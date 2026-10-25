@@ -1,0 +1,6 @@
+# Baseline and model evaluation configuration
+test_id_path: data/test_id.jsonl
+test_heldout_path: data/test_heldout.jsonl
+val_path: data/val.jsonl
+output_dir: outputs/eval
+max_eval_samples: 100  # Evaluate on up to 100 test samples per split for comprehensive coverage
