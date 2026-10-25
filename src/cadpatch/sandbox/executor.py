@@ -77,6 +77,7 @@ import os
 
 code_path = sys.argv[1]
 output_stl_path = sys.argv[2]
+output_step_path = sys.argv[3] if len(sys.argv) > 3 else None
 
 with open(code_path, "r", encoding="utf-8") as f:
     code = f.read()
@@ -147,12 +148,15 @@ try:
 
     # Export STL
     cq.exporters.export(result, output_stl_path)
+    if output_step_path:
+        cq.exporters.export(result, output_step_path)
 
     print(json.dumps({
         "status": "SUCCESS",
         "volume": volume,
         "bbox": bbox_info,
-        "stl_path": output_stl_path
+        "stl_path": output_stl_path,
+        "step_path": output_step_path
     }))
 except Exception as e:
     print(json.dumps({"status": "INVALID_GEOMETRY", "error": f"Geometry evaluation failed: {type(e).__name__}: {str(e)}"}))
@@ -162,7 +166,8 @@ except Exception as e:
 def execute_cadquery_sandbox(
     code_str: str,
     timeout: float = 25.0,
-    python_executable: Optional[str] = None
+    python_executable: Optional[str] = None,
+    export_step: bool = False
 ) -> Dict[str, Any]:
     """
     Executes a CadQuery script inside a sandboxed subprocess.
@@ -194,6 +199,7 @@ def execute_cadquery_sandbox(
         code_file = os.path.join(tmpdir, "script.py")
         worker_file = os.path.join(tmpdir, "worker.py")
         stl_file = os.path.join(tmpdir, "output.stl")
+        step_file = os.path.join(tmpdir, "output.step") if export_step else ""
 
         with open(code_file, "w", encoding="utf-8") as f:
             f.write(code_str)
@@ -201,9 +207,13 @@ def execute_cadquery_sandbox(
             f.write(WORKER_SCRIPT)
 
         # 3. Launch subprocess
+        cmd = [python_executable, worker_file, code_file, stl_file]
+        if export_step:
+            cmd.append(step_file)
+
         try:
             proc = subprocess.run(
-                [python_executable, worker_file, code_file, stl_file],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=timeout
@@ -243,6 +253,11 @@ def execute_cadquery_sandbox(
             if data.get("status") == STATUS_SUCCESS and os.path.exists(stl_file):
                 with open(stl_file, "rb") as sf:
                     data["stl_bytes"] = sf.read()
+
+            if export_step and data.get("status") == STATUS_SUCCESS and os.path.exists(step_file):
+                with open(step_file, "rb") as spf:
+                    data["step_bytes"] = spf.read()
+
             return data
         except Exception as e:
             return {

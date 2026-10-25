@@ -1,0 +1,32 @@
+server:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins:
+    - "http://localhost:5173"
+    - "http://127.0.0.1:5173"
+    - "http://localhost:8000"
+    - "http://127.0.0.1:8000"
+    - "*"
+
+model:
+  backend: "mock"  # "mock" | "local_peft" | "merged_model"
+  base_model: "Qwen/Qwen2.5-Coder-0.5B-Instruct"
+  adapter_path: "outputs/checkpoints/patch_model"
+  full_regen_adapter_path: "outputs/checkpoints/full_model"
+  load_in_4bit: false
+  device: "auto"
+  max_new_tokens: 256
+  retry_count: 3
+  temperature: 0.2
+
+security:
+  max_script_bytes: 20480  # 20 KB
+  max_instruction_chars: 500
+  sandbox_timeout_seconds: 15.0
+  rate_limit_per_minute: 10
+  max_queue_size: 50
+
+storage:
+  artifact_dir: "outputs/web_jobs"
+  ttl_seconds: 3600  # 1 hour
+  cache_geometry: true
