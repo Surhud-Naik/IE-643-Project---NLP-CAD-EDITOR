@@ -87,6 +87,11 @@ while True:
         if export_stl and stl_path:
             cq.exporters.export(result, stl_path)
 
+        export_step = req.get("export_step", False)
+        step_path = req.get("step_path", "")
+        if export_step and step_path:
+            cq.exporters.export(result, step_path)
+
         print(json.dumps({
             "status": "SUCCESS",
             "volume": volume,
@@ -146,7 +151,9 @@ class CadQueryDaemonSandbox:
         code_str: str,
         timeout: float = 10.0,
         export_stl: bool = False,
-        stl_path: str = ""
+        stl_path: str = "",
+        export_step: bool = False,
+        step_path: str = ""
     ) -> Dict[str, Any]:
         """Executes code via the daemon worker with AST security pre-check."""
         # 1. Static security check
@@ -159,10 +166,23 @@ class CadQueryDaemonSandbox:
                 "bbox": None
             }
 
+        temp_stl = None
+        temp_step = None
+        import tempfile
+        if export_stl and not stl_path:
+            temp_stl = tempfile.mktemp(suffix=".stl")
+            stl_path = temp_stl
+
+        if export_step and not step_path:
+            temp_step = tempfile.mktemp(suffix=".step")
+            step_path = temp_step
+
         req = json.dumps({
             "code": code_str,
             "export_stl": export_stl,
-            "stl_path": stl_path
+            "stl_path": stl_path,
+            "export_step": export_step,
+            "step_path": step_path
         })
 
         try:
@@ -185,6 +205,27 @@ class CadQueryDaemonSandbox:
 
             data = json.loads(resp_line.strip())
             data["duration"] = duration
+
+            if data.get("status") == "SUCCESS":
+                if export_stl and os.path.exists(stl_path):
+                    with open(stl_path, "rb") as f:
+                        data["stl_bytes"] = f.read()
+                if export_step and os.path.exists(step_path):
+                    with open(step_path, "rb") as f:
+                        data["step_bytes"] = f.read()
+
+            # Clean up temp files if created
+            if temp_stl and os.path.exists(temp_stl):
+                try:
+                    os.remove(temp_stl)
+                except Exception:
+                    pass
+            if temp_step and os.path.exists(temp_step):
+                try:
+                    os.remove(temp_step)
+                except Exception:
+                    pass
+
             return data
 
         except Exception as e:

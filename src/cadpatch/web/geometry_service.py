@@ -10,6 +10,7 @@ import re
 import difflib
 import trimesh
 from ..sandbox.executor import execute_cadquery_sandbox, STATUS_SUCCESS
+from ..sandbox.daemon_sandbox import CadQueryDaemonSandbox
 from ..eval.program_metrics import extract_top_level_params
 from ..eval.geometry_metrics import compute_geometry_metrics
 from .schemas import ChangeSummary, ParameterChange, GeometryMetrics
@@ -20,6 +21,11 @@ class GeometryService:
         self.timeout = timeout
         self.enable_cache = enable_cache
         self._cache: Dict[str, Dict[str, Any]] = {}
+        self._daemon: Optional[CadQueryDaemonSandbox] = None
+        try:
+            self._daemon = CadQueryDaemonSandbox()
+        except Exception:
+            self._daemon = None
 
     def _hash_script(self, script: str) -> str:
         return hashlib.sha256(script.strip().encode("utf-8")).hexdigest()
@@ -34,11 +40,24 @@ class GeometryService:
         if self.enable_cache and script_hash in self._cache:
             return self._cache[script_hash]
 
-        res = execute_cadquery_sandbox(
-            script,
-            timeout=self.timeout,
-            export_step=export_all
-        )
+        res = None
+        if self._daemon is not None:
+            try:
+                res = self._daemon.execute(
+                    script,
+                    timeout=self.timeout,
+                    export_stl=export_all,
+                    export_step=export_all
+                )
+            except Exception:
+                res = None
+
+        if res is None or res.get("status") not in [STATUS_SUCCESS, "SYNTAX_ERROR", "SECURITY_VIOLATION"]:
+            res = execute_cadquery_sandbox(
+                script,
+                timeout=self.timeout,
+                export_step=export_all
+            )
 
         if res.get("status") == STATUS_SUCCESS and export_all:
             stl_bytes = res.get("stl_bytes")

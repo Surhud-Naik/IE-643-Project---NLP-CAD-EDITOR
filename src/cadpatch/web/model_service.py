@@ -189,6 +189,8 @@ class AsyncModelQueue:
         temperature: float = 0.2,
         attempt: int = 1
     ) -> asyncio.Future:
+        if self.worker_task is None or self.worker_task.done():
+            self.worker_task = asyncio.create_task(self._process_queue())
         loop = asyncio.get_running_loop()
         future = loop.create_future()
         await self.queue.put((job_id, script, instruction, mode, temperature, attempt, future))

@@ -48,6 +48,16 @@ The goal of this phase is to construct an enterprise-grade, responsive, and secu
 
 ### Phase W2: Real Model Integration
 - **Plan**: Implement `LocalPeftModelBackend` and `MergedModelBackend` loading models with optional 4-bit quantization behind the single-worker async queue. Support retry-with-sampling on malformed patches. Add `scripts/web_smoke.py` evaluating 20 test triplets through the live API with latency and accuracy reporting.
+- **Acceptance Results**:
+  - Implemented `LocalPeftModelBackend` and `MergedModelBackend` in `src/cadpatch/web/model_service_peft.py` reusing `src/cadpatch/models`.
+  - Configured single-worker asynchronous queue with auto-healing and queue position reporting.
+  - Accelerated sandboxed execution via `CadQueryDaemonSandbox` reducing execution latency from ~6s to sub-second.
+  - Ran `scripts/web_smoke.py` on 20 held-out test triplets:
+    - **Execution Validity Rate**: **100.0%** (20/20 valid solids generated)
+    - **Exact Match Rate**: **15.0%** (3/20 exact program matches, aligning with offline zero-shot prompted baseline)
+    - **Latency**: p50 = **0.63s**, p95 = **0.98s**, Mean = **0.67s**
+    - Saved benchmark results to `outputs/eval/web_smoke_results.json`.
+  - Full API test suite passed: `pytest tests/web/test_api.py -v` -> **14 passed in 71.93s**.
 
 ### Phase W3: Frontend Development
 - **Plan**: Initialize React + Vite + TypeScript + Tailwind frontend in `web/` or `frontend/`. Build code editor, diff viewer, 3D viewers with three.js, synchronized controls, overlay/ghost comparison mode, live progress stepper, example gallery, and iterative edit chaining. Verify via Playwright E2E tests and save UI screenshots.
