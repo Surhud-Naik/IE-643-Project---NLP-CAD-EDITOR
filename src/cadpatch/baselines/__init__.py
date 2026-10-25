@@ -6,6 +6,11 @@ from .methods import (
     PromptedFewShotPatch,
     PromptedFullRegeneration,
 )
+from .locate_infill import (
+    LocateThenInfillPipeline,
+    compute_span_iou,
+    find_ground_truth_span,
+)
 
 __all__ = [
     "BaselineMethod",
@@ -14,4 +19,7 @@ __all__ = [
     "OracleRandomPerturbation",
     "PromptedFewShotPatch",
     "PromptedFullRegeneration",
+    "LocateThenInfillPipeline",
+    "compute_span_iou",
+    "find_ground_truth_span",
 ]
