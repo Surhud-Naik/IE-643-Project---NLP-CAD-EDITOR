@@ -1,0 +1,7 @@
+# Dataset generation configuration
+target_count: 1000
+seed: 42
+held_out_templates:
+  - shelled_box
+  - revolve_pulley
+output_dir: data

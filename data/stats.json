@@ -1,0 +1,14 @@
+{
+  "total_count": 1000,
+  "train_count": 560,
+  "val_count": 120,
+  "test_id_count": 120,
+  "test_heldout_count": 200,
+  "avg_program_lines": 18.819,
+  "avg_patch_lines": 5.943,
+  "patch_to_full_token_ratio": 0.3152320107599193,
+  "held_out_templates": [
+    "revolve_pulley",
+    "shelled_box"
+  ]
+}
