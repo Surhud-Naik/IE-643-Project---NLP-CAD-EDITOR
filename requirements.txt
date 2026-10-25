@@ -1,0 +1,24 @@
+# Core CadQuery & Solid Geometry Modeling
+cadquery>=2.4.0
+trimesh>=4.0.0
+numpy>=1.24.0,<2.0.0
+scipy>=1.10.0
+
+# Deep Learning & Transformers
+torch>=2.1.0
+transformers>=4.40.0
+peft>=0.10.0
+trl>=0.8.0
+datasets>=2.18.0
+accelerate>=0.28.0
+
+# Evaluation, Parsing & Utilities
+pytest>=8.0.0
+rapidfuzz>=3.6.0
+pandas>=2.0.0
+matplotlib>=3.8.0
+pyyaml>=6.0.1
+tqdm>=4.66.0
+
+# Interactive Web Application
+gradio>=4.20.0

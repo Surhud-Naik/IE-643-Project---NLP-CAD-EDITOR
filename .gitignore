@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Pytest / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Project data and artifacts
+data/raw/
+data/cache/
+outputs/
+temp.stl
+*.stl
+*.step
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
