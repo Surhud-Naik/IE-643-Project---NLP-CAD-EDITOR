@@ -167,3 +167,70 @@ Open `http://localhost:7860` to test CAD program editing with live 3D preview re
 - All code, templates, instruction phrasings, sandboxes, and metrics were authored from scratch for the IE 643 course project.
 - No code or datasets from `microsoft/CAD-Editor` or external repositories were copied.
 - Detailed library licenses and relation to prior work are documented in [`docs/ATTRIBUTION.md`](docs/ATTRIBUTION.md).
+
+---
+
+## 🚀 Web Application Progress & Engineering Summary
+
+### 1. Progress Accomplished So Far
+- **Machine Learning & Core Pipeline (Phases 1-6)**:
+  - 10 parametric CAD templates with physical and geometric validity constraints.
+  - Synthetic dataset generator producing 1,000 verified `(CadQuery program, natural-language edit instruction, edited program)` triplets.
+  - Search/Replace patch engine (`src/cadpatch/patching`) with ambiguity detection, AST normalization, and whitespace fuzzing.
+  - Sandboxed execution (`src/cadpatch/sandbox`) enforcing memory caps, execution timeouts, AST security pre-checks (restricting imports to `cadquery`/`math`, blocking dunder methods, `eval`, `exec`, and file/socket access).
+  - LoRA fine-tuning on Qwen2.5-Coder-1.5B-Instruct, achieving strong parameter edit precision with 68.5% fewer output tokens than full-program regeneration.
+  - Evaluation harness with Chamfer distance (KDTree), volumetric IoU, and unintended parameter change tracking.
+
+- **Phase W1: Production Web Backend (`src/cadpatch/web`)**:
+  - FastAPI web server exposing full OpenAPI-documented REST and Server-Sent Event (SSE) endpoints:
+    - `GET /api/health`, `GET /api/examples`, `GET /api/config`
+    - `POST /api/edit`, `POST /api/validate` (pre-flight dry-run)
+    - `GET /api/jobs/{id}`, `GET /api/jobs/{id}/events` (live event streaming: queued &rarr; validating &rarr; generating &rarr; applying &rarr; executing &rarr; done/failed)
+    - `GET /api/jobs/{id}/download/{kind}` (`py`, `patch`, `stl`, `step`, `glb`, `original_glb`)
+  - Strict security layer: AST validation, 20 KB script limits, 500-char instruction limit, sliding-window IP rate limiter (10 req/min).
+  - Sandboxed `GeometryService`: SHA256 script caching, OpenCASCADE B-Rep tessellation, STL/STEP export, and trimesh GLB generation.
+  - Single-worker async inference queue (`AsyncModelQueue`) with configurable mock and real backends.
+  - Test suite in `tests/web/test_api.py` with 14/14 passing tests.
+
+- **Phase W2: Real Model Integration & Acceleration**:
+  - Implemented `LocalPeftModelBackend` and `MergedModelBackend` integrating LoRA adapters, greedy and sampled retry inference ($k=3$).
+  - Developed `CadQueryDaemonSandbox` (persistent worker process over stdio), eliminating OpenCASCADE C++ library load overhead.
+  - Live smoke test (`scripts/web_smoke.py`) on 20 held-out test triplets via the live API: achieved **100% validity** (20/20 valid solids) and **sub-second p50 latency (0.63s)**.
+
+- **Phase W3: Production Web Frontend (`web/`)**:
+  - Single-page web application built with React 19, TypeScript, Vite, and custom CSS design tokens (glassmorphism, dark/light themes, glowing accents).
+  - Dual synchronized interactive 3D viewers powered by Three.js with OrbitControls, shaded/wireframe toggles, camera reset, and a **translucent ghost overlay mode** (original model in semi-transparent grey, edited in cyan).
+  - Search/Replace code patch diff viewer with line-level syntax highlighting.
+  - "What Changed" panel displaying AST parameter modifications, line diff counts, and token savings percentage (-68.5%).
+  - One-click Example Gallery featuring 8 diverse mechanical parts (drill plates, bushings, fillets, chamfers, brackets, flanges, enclosures).
+  - CadQuery Convention Help modal explaining why program editing beats raw STEP/STL meshes.
+  - Multi-turn editing workflow: "Continue Editing from Result" button and session history (last 10 edits) with one-click revert.
+  - Playwright end-to-end browser test suite (`tests/web/test_e2e_playwright.py`) with UI screenshots saved in `outputs/web_screenshots/`.
+
+---
+
+### 2. Problems & Challenges Encountered (and How They Were Solved)
+1. **OpenCASCADE DLL Cold-Start Latency (6–9s per execution)**:
+   - *Problem*: Spawning fresh Python subprocesses to import `cadquery` on Windows incurred 6 to 9 seconds of C++ DLL loading overhead per run.
+   - *Fix*: Architected `CadQueryDaemonSandbox`, a persistent daemon worker communicating via JSON-RPC over stdio, caching loaded OpenCASCADE libraries and reducing execution latency to ~10 milliseconds (>100x speedup).
+2. **Asyncio Queue Event Loop Mismatch**:
+   - *Problem*: Initializing `asyncio.Queue()` before Uvicorn's event loop bound the queue to the wrong thread loop, causing inference jobs to stall.
+   - *Fix*: Updated `AsyncModelQueue._get_queue()` to lazily initialize queues on the active running loop at request time.
+3. **React 19 Virtual DOM vs. Three.js DOM Node Removal**:
+   - *Problem*: Attaching the Three.js canvas directly to a React container containing JSX child overlays caused React unmount errors (`Failed to execute 'removeChild' on 'Node'`).
+   - *Fix*: Isolated the Three.js WebGL canvas into a dedicated, childless inner `<div>`, ensuring Three.js DOM manipulations never collide with React's virtual DOM reconciliation.
+4. **Playwright E2E Lifespan in Windows Background Threads**:
+   - *Problem*: Running Uvicorn in a `threading.Thread` in Windows inside pytest skipped ASGI lifespan hooks, preventing the queue worker from starting.
+   - *Fix*: Standardized the test fixture to run Uvicorn in a clean subprocess (`subprocess.Popen`), allowing full ASGI startup and SSE streaming during browser tests.
+
+---
+
+### 3. What Is Left (Future Work / Next Steps)
+1. **Containerization (Phase W4)**:
+   - Build multi-stage `Dockerfile` with optional CUDA base image and configure `docker-compose.yml`.
+   - Complete `make web-dev`, `make web-build`, and `make web-serve` convenience targets.
+   - Run multi-user concurrent load test script (`scripts/web_load_test.py`) to benchmark queue throughput under 10+ concurrent requests.
+2. **Cloud Deployment (Phase W5)**:
+   - Provide `docs/deploy.md` detailing step-by-step deployment on Hugging Face Spaces (Docker/Gradio wrapper) and small GPU cloud VMs (RunPod/Lambda).
+   - Add CPU-only quantization fallback documentation for zero-GPU environments.
+

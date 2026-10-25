@@ -118,6 +118,8 @@ class JobManager:
             "current_attempt": job.current_attempt,
             "max_attempts": job.retry_count,
             "message": message,
+            "error": job.error,
+            "raw_patch": job.raw_patch,
             "result": job.result.model_dump() if job.result else None
         }
         for q in list(job.subscribers):
@@ -141,6 +143,8 @@ class JobManager:
             "current_attempt": job.current_attempt,
             "max_attempts": job.retry_count,
             "message": job.message,
+            "error": job.error,
+            "raw_patch": job.raw_patch,
             "result": job.result.model_dump() if job.result else None
         }
         yield f"data: {json.dumps(initial_data)}\n\n"

@@ -153,11 +153,17 @@ class AsyncModelQueue:
     """
     def __init__(self, backend: ModelBackend):
         self.backend = backend
-        self.queue: asyncio.Queue = asyncio.Queue()
+        self.queue: Optional[asyncio.Queue] = None
         self.worker_task: Optional[asyncio.Task] = None
         self._current_job_id: Optional[str] = None
 
+    def _get_queue(self) -> asyncio.Queue:
+        if self.queue is None:
+            self.queue = asyncio.Queue()
+        return self.queue
+
     async def start(self):
+        self._get_queue()
         if self.worker_task is None or self.worker_task.done():
             self.worker_task = asyncio.create_task(self._process_queue())
 
@@ -171,6 +177,8 @@ class AsyncModelQueue:
 
     def get_queue_position(self, job_id: str) -> int:
         if self._current_job_id == job_id:
+            return 0
+        if self.queue is None:
             return 0
         pos = 1
         # Inspect queue items without modifying
@@ -189,17 +197,19 @@ class AsyncModelQueue:
         temperature: float = 0.2,
         attempt: int = 1
     ) -> asyncio.Future:
+        q = self._get_queue()
         if self.worker_task is None or self.worker_task.done():
             self.worker_task = asyncio.create_task(self._process_queue())
         loop = asyncio.get_running_loop()
         future = loop.create_future()
-        await self.queue.put((job_id, script, instruction, mode, temperature, attempt, future))
+        await q.put((job_id, script, instruction, mode, temperature, attempt, future))
         return future
 
     async def _process_queue(self):
+        q = self._get_queue()
         while True:
             try:
-                item = await self.queue.get()
+                item = await q.get()
                 job_id, script, instruction, mode, temperature, attempt, future = item
                 self._current_job_id = job_id
                 try:
@@ -221,7 +231,7 @@ class AsyncModelQueue:
                         future.set_exception(e)
                 finally:
                     self._current_job_id = None
-                    self.queue.task_done()
+                    q.task_done()
             except asyncio.CancelledError:
                 break
             except Exception:
