@@ -38,7 +38,7 @@ def create_app(
     elif config.model_backend == "mock":
         model_backend = MockModelBackend()
     else:
-        # local_peft or merged_model (Phase W2 imports)
+        # Local PEFT or merged model backend
         from .model_service_peft import create_peft_backend
         model_backend = create_peft_backend(config)
 
