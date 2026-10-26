@@ -35,30 +35,6 @@
   --shadow-glow: 0 0 25px rgba(14, 165, 233, 0.25);
 }
 
-.light-theme {
-  --bg-primary: #f8fafc;
-  --bg-secondary: #f1f5f9;
-  --bg-card: rgba(255, 255, 255, 0.9);
-  --bg-card-hover: rgba(248, 250, 252, 0.95);
-  --border-color: #cbd5e1;
-  --border-focus: #0284c7;
-
-  --text-main: #0f172a;
-  --text-muted: #475569;
-  --text-faint: #94a3b8;
-
-  --diff-del-bg: #ffe4e6;
-  --diff-del-border: #e11d48;
-  --diff-del-text: #9f1239;
-  --diff-add-bg: #dcfce7;
-  --diff-add-border: #059669;
-  --diff-add-text: #065f46;
-
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.08);
-  --shadow-glow: 0 0 25px rgba(14, 165, 233, 0.15);
-}
-
 * {
   box-sizing: border-box;
   margin: 0;

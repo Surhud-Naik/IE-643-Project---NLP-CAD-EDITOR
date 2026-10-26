@@ -3,11 +3,13 @@ import { Copy, Check, GitCommit } from 'lucide-react';
 
 interface DiffViewerProps {
   patchText?: string;
+  editedScript?: string;
   linesTouched?: number;
 }
 
-export const DiffViewer: React.FC<DiffViewerProps> = ({ patchText, linesTouched = 0 }) => {
-  const [copied, setCopied] = React.useState(false);
+export const DiffViewer: React.FC<DiffViewerProps> = ({ patchText, editedScript, linesTouched = 0 }) => {
+  const [copiedPatch, setCopiedPatch] = React.useState(false);
+  const [copiedScript, setCopiedScript] = React.useState(false);
 
   if (!patchText) {
     return (
@@ -17,10 +19,18 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ patchText, linesTouched 
     );
   }
 
-  const handleCopy = () => {
+  const handleCopyPatch = () => {
     navigator.clipboard.writeText(patchText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedPatch(true);
+    setTimeout(() => setCopiedPatch(false), 2000);
+  };
+
+  const handleCopyScript = () => {
+    if (editedScript) {
+      navigator.clipboard.writeText(editedScript);
+      setCopiedScript(true);
+      setTimeout(() => setCopiedScript(false), 2000);
+    }
   };
 
   const lines = patchText.split('\n');
@@ -35,6 +45,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ patchText, linesTouched 
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '0.5rem',
         background: 'rgba(15, 23, 42, 0.5)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -47,14 +59,35 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ patchText, linesTouched 
           )}
         </div>
 
-        <button
-          onClick={handleCopy}
-          className="btn-outline"
-          style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
-        >
-          {copied ? <Check size={13} color="var(--accent-emerald)" /> : <Copy size={13} />}
-          <span>{copied ? 'Copied' : 'Copy Patch'}</span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          {editedScript && (
+            <button
+              onClick={handleCopyScript}
+              className="btn-outline"
+              style={{
+                padding: '0.25rem 0.65rem',
+                fontSize: '0.75rem',
+                borderColor: copiedScript ? 'var(--accent-emerald)' : 'var(--accent-blue)',
+                color: copiedScript ? 'var(--accent-emerald)' : 'var(--accent-cyan)',
+                background: copiedScript ? 'rgba(16, 185, 129, 0.15)' : 'rgba(14, 165, 233, 0.1)'
+              }}
+              title="Copy the entire edited CadQuery Python script"
+            >
+              {copiedScript ? <Check size={13} color="var(--accent-emerald)" /> : <Copy size={13} />}
+              <span>{copiedScript ? 'Copied Code!' : 'Copy Changed Code'}</span>
+            </button>
+          )}
+
+          <button
+            onClick={handleCopyPatch}
+            className="btn-outline"
+            style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
+            title="Copy search/replace patch text"
+          >
+            {copiedPatch ? <Check size={13} color="var(--accent-emerald)" /> : <Copy size={13} />}
+            <span>{copiedPatch ? 'Copied' : 'Copy Patch'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Diff Body */}

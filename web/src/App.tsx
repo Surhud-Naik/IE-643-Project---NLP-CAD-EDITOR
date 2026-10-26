@@ -9,13 +9,13 @@ import {
   CheckCircle,
   AlertCircle,
   HelpCircle,
-  Sun,
-  Moon,
   Layers,
   Link,
   Unlink,
   History,
-  ArrowRight
+  ArrowRight,
+  Copy,
+  Check
 } from 'lucide-react';
 import * as THREE from 'three';
 
@@ -44,17 +44,16 @@ result = (
 `;
 
 export function App() {
-  // Theme state
-  const [isDark, setIsDark] = useState(true);
-
   // Modals state
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
 
   // App data & config
   const [examples, setExamples] = useState<ExampleItem[]>([]);
-  const [backendMode, setBackendMode] = useState<string>('mock');
   const [availableModes, setAvailableModes] = useState<string[]>(['patch']);
+
+  // Copy code feedback state
+  const [copiedCode, setCopiedCode] = useState(false);
 
   // Editor and Instruction state
   const [script, setScript] = useState<string>(DEFAULT_SCRIPT);
@@ -95,7 +94,6 @@ export function App() {
     fetch('/api/config')
       .then((res) => res.json())
       .then((data) => {
-        setBackendMode(data.model_backend || 'mock');
         if (data.available_modes) setAvailableModes(data.available_modes);
       })
       .catch((err) => console.warn('Could not fetch server config:', err));
@@ -295,8 +293,17 @@ export function App() {
     }
   };
 
+  // Copy full edited script
+  const handleCopyChangedCode = () => {
+    if (jobResult?.edited_script) {
+      navigator.clipboard.writeText(jobResult.edited_script);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
+    }
+  };
+
   return (
-    <div className={isDark ? '' : 'light-theme'} style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* Hidden File Input */}
       <input
         type="file"
@@ -345,24 +352,6 @@ export function App() {
 
           {/* Header Controls */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-            {/* Backend status indicator */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.45rem',
-              padding: '0.35rem 0.75rem',
-              borderRadius: '9999px',
-              background: 'rgba(15, 23, 42, 0.6)',
-              border: '1px solid var(--border-color)',
-              fontSize: '0.75rem'
-            }}>
-              <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--accent-emerald)' }} />
-              <span style={{ color: 'var(--text-muted)' }}>Backend:</span>
-              <span style={{ fontWeight: 600, color: 'var(--accent-cyan)' }}>
-                {backendMode === 'mock' ? 'Mock Deterministic Patcher' : 'LoRA Fine-Tuned'}
-              </span>
-            </div>
-
             {/* Gallery Modal Button */}
             <button
               onClick={() => setGalleryOpen(true)}
@@ -381,16 +370,6 @@ export function App() {
             >
               <HelpCircle size={15} color="var(--accent-blue)" />
               <span>Convention</span>
-            </button>
-
-            {/* Theme Toggle */}
-            <button
-              onClick={() => setIsDark(!isDark)}
-              className="btn-outline"
-              style={{ padding: '0.5rem' }}
-              title="Toggle Theme"
-            >
-              {isDark ? <Sun size={16} /> : <Moon size={16} />}
             </button>
           </div>
         </div>
@@ -734,7 +713,7 @@ export function App() {
                 gap: '0.75rem',
                 background: 'rgba(15, 23, 42, 0.6)'
               }}>
-                {/* Download Buttons */}
+                {/* Download and Copy Buttons */}
                 <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginRight: '0.3rem' }}>
                     Download:
@@ -759,6 +738,25 @@ export function App() {
                     <Download size={13} />
                     <span>GLB</span>
                   </a>
+
+                  {/* Copy Changed Code Button */}
+                  <button
+                    onClick={handleCopyChangedCode}
+                    className="btn-outline"
+                    title="Copy full edited CadQuery Python script to clipboard"
+                    style={{
+                      borderColor: copiedCode ? 'var(--accent-emerald)' : 'var(--accent-blue)',
+                      color: copiedCode ? 'var(--accent-emerald)' : 'var(--accent-cyan)',
+                      background: copiedCode ? 'rgba(16, 185, 129, 0.15)' : 'rgba(14, 165, 233, 0.12)',
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem'
+                    }}
+                  >
+                    {copiedCode ? <Check size={13} color="var(--accent-emerald)" /> : <Copy size={13} />}
+                    <span>{copiedCode ? 'Copied Code!' : 'Copy Changed Code'}</span>
+                  </button>
                 </div>
 
                 {/* Chaining Button: Continue editing from this result */}
@@ -776,6 +774,7 @@ export function App() {
             {/* Predicted Diff Viewer */}
             <DiffViewer
               patchText={jobResult?.patch_text}
+              editedScript={jobResult?.edited_script}
               linesTouched={jobResult?.change_summary?.lines_touched}
             />
 
