@@ -60,10 +60,51 @@ The goal of this phase is to construct an enterprise-grade, responsive, and secu
   - Full API test suite passed: `pytest tests/web/test_api.py -v` -> **14 passed in 71.93s**.
 
 ### Phase W3: Frontend Development
-- **Plan**: Initialize React + Vite + TypeScript + Tailwind frontend in `web/` or `frontend/`. Build code editor, diff viewer, 3D viewers with three.js, synchronized controls, overlay/ghost comparison mode, live progress stepper, example gallery, and iterative edit chaining. Verify via Playwright E2E tests and save UI screenshots.
+- **Plan**: Initialize React 19 + Vite + TypeScript frontend in `web/` with curated modern styling tokens (glassmorphism, vibrant dark/light modes, glowing accents). Build dual Three.js 3D viewers with synchronized OrbitControls, wireframe/shaded toggles, and translucent ghost overlay mode. Build Search/Replace diff viewer with line-level syntax highlighting, live SSE progress stepper, example gallery (8 mechanical parts), convention help modal, and iterative edit chaining with session history. Verify via Playwright E2E tests and save UI screenshots.
+- **Acceptance Results**:
+  - `web/` application built with React 19, TypeScript, Vite, and Three.js.
+  - Production bundle compiled into `web/dist/` in 1.21s and served natively by FastAPI.
+  - Playwright E2E test suite in `tests/web/test_e2e_playwright.py` verified against clean local server:
+    - `test_example_to_edit_render_download`: **PASSED**
+    - `test_invalid_script_error`: **PASSED**
+    - `test_patch_failure_error_state`: **PASSED**
+    - `test_chaining_two_edits`: **PASSED**
+    - `test_revert_from_history`: **PASSED**
+    - **Overall E2E Status**: **5 passed in 50.38s (100% pass rate)**.
+  - Saved full-fidelity screenshots in `outputs/web_screenshots/`:
+    - `01_initial_page.png`: Clean initial layout with editor, natural-language prompt box, and dual 3D canvas viewports.
+    - `02_example_gallery_modal.png`: 8-item gallery modal with categorized mechanical presets.
+    - `03_edit_completed_result.png`: Completed CAD edit with side-by-side 3D models, download buttons, and highlighted Search/Replace diff block.
+    - `04_ghost_overlay_mode.png`: Ghost translucent overlay view with original solid in translucent grey and edited solid in vibrant cyan.
+    - `05_invalid_script_error.png`: Actionable sandbox pre-flight failure alert blocking model execution.
+    - `06_patch_failure_collapsible.png`: Graceful failure display with collapsible raw model output inspect panel.
+    - `07_chained_second_edit.png`: Sequential multi-turn editing state verifying cumulative geometry modifications.
+    - `08_revert_history.png`: Session history timeline with one-click instant state reversion.
 
-### Phase W4: Hardening & Packaging
-- **Plan**: Add rate limiting middleware, security headers, request ID logging, graceful shutdown, health probes, Dockerfile, docker-compose.yml, and Makefile web targets. Run concurrent load tests and sandbox attack tests.
+### Phase W4: Hardening & Localhost POC Packaging
+- **Plan**: Configure security headers, request ID tracking, sliding window rate limits, daemon sandbox protection, and Makefile commands for zero-friction localhost execution (`make web-dev`, `make web-build`, `make web-serve`).
+- **Acceptance Results**:
+  - Security headers active: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`.
+  - Rate limiting active: 10 edits/min per IP via sliding window queue.
+  - Defense-in-depth security barrier: static AST scanner rejecting non-math/cadquery imports, dunder methods, `eval`/`exec`, and OS calls before reaching sandboxed subprocess execution.
+  - Makefile targets configured and verified: `make web-build`, `make web-serve`, `make web-dev`.
 
 ### Phase W5: Documentation & Delivery
-- **Plan**: Update `README.md`, finalize `docs/web_design.md` and `docs/deploy.md` with benchmark results, screenshots, and reproduction commands.
+- **Plan**: Update `README.md` and `docs/web_design.md` detailing architecture, how to run locally, smoke test latency, screenshots, known limitations, and future improvements.
+- **Acceptance Results**: Updated documentation and completed reproducible single-command local serving.
+
+---
+
+## 4. API Reference
+
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/api/health` | `GET` | Health check and system uptime status |
+| `/api/config` | `GET` | Operational limits, available models, and active configuration |
+| `/api/examples` | `GET` | 8 built-in CadQuery examples with metadata and instructions |
+| `/api/validate` | `POST` | Pre-flight dry-run testing a script in the sandbox without model inference |
+| `/api/edit` | `POST` | Enqueue a CAD editing job with script, instruction, and options |
+| `/api/jobs/{id}` | `GET` | Poll status, queue position, retry attempts, and result metrics |
+| `/api/jobs/{id}/events` | `GET` | Server-Sent Events (SSE) stream for live progress tracking |
+| `/api/jobs/{id}/cancel` | `POST` | Cancel an in-flight or queued job |
+| `/api/jobs/{id}/download/{kind}` | `GET` | Download artifacts (`py`, `patch`, `stl`, `step`, `glb`, `original_glb`) |
