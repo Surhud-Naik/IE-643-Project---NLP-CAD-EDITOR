@@ -31,4 +31,16 @@ test:
 	@echo "Running test suite..."
 	$(PYTEST) tests/ -v
 
-all: test data baselines train eval
+web-build:
+	@echo "Building React production bundle..."
+	cd web && npm run build
+
+web-serve:
+	@echo "Starting CAD Patch Editor production server on http://localhost:8000..."
+	$(PYTHON) -m uvicorn cadpatch.web.app:app --host 127.0.0.1 --port 8000
+
+web-dev:
+	@echo "Starting hot-reload development server..."
+	$(PYTHON) -m uvicorn cadpatch.web.app:app --host 127.0.0.1 --port 8000 --reload
+
+all: test data baselines train eval web-build
