@@ -5,6 +5,7 @@ Integrates LoRA patch model and full regeneration baseline with retry-with-sampl
 
 from typing import Dict, Any, Tuple, Optional
 import os
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
 import re
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -12,6 +13,23 @@ from peft import PeftModel
 from ..models.prompt_formatter import format_patch_prompt, format_full_prompt
 from .model_service import ModelBackend
 from .config import WebConfig
+
+
+def resolve_device_and_dtype(device_pref: str = "auto") -> Tuple[torch.device, torch.dtype]:
+    pref = (device_pref or "auto").lower()
+    if pref in ("cuda", "auto") and torch.cuda.is_available():
+        return torch.device("cuda"), torch.float16
+    elif pref in ("mps", "auto") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps"), torch.bfloat16
+    else:
+        return torch.device("cpu"), torch.float32
+
+
+def empty_device_cache(device: torch.device):
+    if device.type == "cuda" and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    elif device.type == "mps" and hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+        torch.mps.empty_cache()
 
 
 class LocalPeftModelBackend(ModelBackend):
@@ -25,7 +43,7 @@ class LocalPeftModelBackend(ModelBackend):
         max_new_tokens: int = 256
     ):
         self.max_new_tokens = max_new_tokens
-        self.device = torch.device("cuda" if (device == "auto" and torch.cuda.is_available()) or device == "cuda" else "cpu")
+        self.device, self.dtype = resolve_device_and_dtype(device)
         
         self.tokenizer = AutoTokenizer.from_pretrained(base_model_name, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
@@ -46,33 +64,37 @@ class LocalPeftModelBackend(ModelBackend):
             else:
                 model_kwargs["torch_dtype"] = torch.float16
         else:
-            model_kwargs["torch_dtype"] = torch.float32
+            model_kwargs["torch_dtype"] = self.dtype
 
         base_model = AutoModelForCausalLM.from_pretrained(base_model_name, **model_kwargs)
 
-        # Load LoRA patch adapter if available
+        # Load LoRA patch adapter and full regen adapter onto single base model
         if patch_adapter_path and os.path.exists(patch_adapter_path):
-            self.patch_model = PeftModel.from_pretrained(base_model, patch_adapter_path)
+            self.model = PeftModel.from_pretrained(base_model, patch_adapter_path, adapter_name="patch")
             self.has_patch_adapter = True
-        else:
-            self.patch_model = base_model
+            if full_adapter_path and os.path.exists(full_adapter_path):
+                try:
+                    self.model.load_adapter(full_adapter_path, adapter_name="full_regen")
+                    self.has_full_adapter = True
+                except Exception:
+                    self.has_full_adapter = False
+            else:
+                self.has_full_adapter = False
+        elif full_adapter_path and os.path.exists(full_adapter_path):
+            self.model = PeftModel.from_pretrained(base_model, full_adapter_path, adapter_name="full_regen")
             self.has_patch_adapter = False
+            self.has_full_adapter = True
+        else:
+            self.model = base_model
+            self.has_patch_adapter = False
+            self.has_full_adapter = False
 
         if not load_in_4bit:
-            self.patch_model.to(self.device)
-        self.patch_model.eval()
+            self.model.to(self.device)
+        self.model.eval()
 
-        # Optional full-regeneration model adapter
-        self.full_model = None
-        if full_adapter_path and os.path.exists(full_adapter_path):
-            try:
-                base_full = AutoModelForCausalLM.from_pretrained(base_model_name, **model_kwargs)
-                self.full_model = PeftModel.from_pretrained(base_full, full_adapter_path)
-                if not load_in_4bit:
-                    self.full_model.to(self.device)
-                self.full_model.eval()
-            except Exception:
-                self.full_model = None
+        self.patch_model = self.model
+        self.full_model = self.model if self.has_full_adapter else None
 
     def generate(
         self,
@@ -82,12 +104,14 @@ class LocalPeftModelBackend(ModelBackend):
         temperature: float = 0.2,
         attempt: int = 1
     ) -> Tuple[str, str]:
-        if mode == "full_regen" and self.full_model is not None:
-            model = self.full_model
+        if mode == "full_regen":
             prompt = format_full_prompt(script, instruction)
+            if hasattr(self.model, "set_adapter") and self.has_full_adapter:
+                self.model.set_adapter("full_regen")
         else:
-            model = self.patch_model
             prompt = format_patch_prompt(script, instruction)
+            if hasattr(self.model, "set_adapter") and self.has_patch_adapter:
+                self.model.set_adapter("patch")
 
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
 
@@ -97,7 +121,7 @@ class LocalPeftModelBackend(ModelBackend):
         temp = temperature if do_sample else None
 
         with torch.no_grad():
-            gen_tokens = model.generate(
+            gen_tokens = self.model.generate(
                 **inputs,
                 max_new_tokens=self.max_new_tokens,
                 do_sample=do_sample,
@@ -108,6 +132,7 @@ class LocalPeftModelBackend(ModelBackend):
 
         completion_tokens = gen_tokens[0][inputs["input_ids"].shape[1]:]
         raw_output = self.tokenizer.decode(completion_tokens, skip_special_tokens=True).strip()
+        empty_device_cache(self.device)
 
         if mode == "full_regen":
             cleaned = self._clean_code(raw_output)
@@ -133,15 +158,15 @@ class LocalPeftModelBackend(ModelBackend):
 
 
 class MergedModelBackend(ModelBackend):
-    def __init__(self, model_path: str, max_new_tokens: int = 256):
+    def __init__(self, model_path: str, max_new_tokens: int = 256, device: str = "auto"):
         self.max_new_tokens = max_new_tokens
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device, self.dtype = resolve_device_and_dtype(device)
         self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
-            torch_dtype=torch.float16 if self.device.type == "cuda" else torch.float32,
+            torch_dtype=self.dtype,
             trust_remote_code=True
         ).to(self.device)
         self.model.eval()
@@ -171,6 +196,7 @@ class MergedModelBackend(ModelBackend):
 
         completion_tokens = gen_tokens[0][inputs["input_ids"].shape[1]:]
         raw_output = self.tokenizer.decode(completion_tokens, skip_special_tokens=True).strip()
+        empty_device_cache(self.device)
         match = re.search(r"(<<<<<<< SEARCH.*?>>>>>>> REPLACE)", raw_output, re.DOTALL)
         cleaned = match.group(1).strip() if match else raw_output.strip()
         return cleaned, raw_output

@@ -9,10 +9,10 @@ server:
     - "*"
 
 model:
-  backend: "mock"  # "mock" | "local_peft" | "merged_model"
+  backend: "local_peft"  # "mock" | "local_peft" | "merged_model"
   base_model: "Qwen/Qwen2.5-Coder-0.5B-Instruct"
-  adapter_path: "outputs/checkpoints/patch_model"
-  full_regen_adapter_path: "outputs/checkpoints/full_model"
+  adapter_path: "outputs/models/patch_lora"
+  full_regen_adapter_path: "outputs/models/full_lora"
   load_in_4bit: false
   device: "auto"
   max_new_tokens: 256

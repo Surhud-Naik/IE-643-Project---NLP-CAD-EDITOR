@@ -11,7 +11,7 @@ lora_dropout: 0.05
 
 learning_rate: 0.0002
 epochs: 3
-batch_size: 2
-grad_accum: 4
-max_length: 512
-max_samples: 100  # calibrated for fast local convergence on available CPU/VRAM
+batch_size: 1
+grad_accum: 8
+max_length: 768
+max_samples: null

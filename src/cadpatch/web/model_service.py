@@ -8,6 +8,7 @@ import asyncio
 import re
 from ..eval.program_metrics import extract_top_level_params
 from ..patching.patch import make_patch
+from ..patching.expr import resolve_instruction_edits
 
 
 class ModelBackend:
@@ -53,98 +54,16 @@ class MockModelBackend(ModelBackend):
                 return bad, bad
             # On attempt >= 2, fall through to valid edit
 
-        # Semantic parameter editing
-        params = extract_top_level_params(script)
-        if not params:
-            # Fallback if no top-level params found
-            bad = "Error: No parameters found to modify."
+        # Semantic parameter editing using safe AST expression evaluator
+        res = resolve_instruction_edits(script, instruction)
+        if not res["success"]:
+            bad = f"Error: {res.get('error', 'Could not identify parameter to edit.')}"
             return bad, bad
-
-        # Identify target parameter
-        target_param = None
-        delta = 2.0
-
-        # Extract numeric magnitude if present in instruction
-        num_matches = re.findall(r"[-+]?\d*\.?\d+", instruction)
-        if num_matches:
-            try:
-                delta = float(num_matches[0])
-            except ValueError:
-                delta = 2.0
-
-        if any(k in inst_lower for k in ["hole", "widen", "bore", "diameter", "radius", "drill"]):
-            for p in ["HOLE_DIA", "HOLE_RADIUS", "INNER_RADIUS", "BORE_RADIUS", "DIAMETER", "RADIUS"]:
-                if p in params:
-                    target_param = p
-                    break
-        elif any(k in inst_lower for k in ["fillet", "round", "curve"]):
-            for p in ["FILLET_RADIUS", "FILLET", "CORNER_FILLET"]:
-                if p in params:
-                    target_param = p
-                    break
-        elif any(k in inst_lower for k in ["chamfer", "bevel"]):
-            for p in ["CHAMFER_DIST", "CHAMFER"]:
-                if p in params:
-                    target_param = p
-                    break
-        elif any(k in inst_lower for k in ["length", "longer", "extend"]):
-            for p in ["LENGTH", "BASE_LENGTH", "PLATE_LENGTH"]:
-                if p in params:
-                    target_param = p
-                    break
-        elif any(k in inst_lower for k in ["width", "widen"]):
-            for p in ["WIDTH", "BASE_WIDTH", "PLATE_WIDTH"]:
-                if p in params:
-                    target_param = p
-                    break
-        elif any(k in inst_lower for k in ["height", "thicker", "thickness", "tall"]):
-            for p in ["HEIGHT", "THICKNESS", "BASE_HEIGHT", "PLATE_THICKNESS"]:
-                if p in params:
-                    target_param = p
-                    break
-
-        if not target_param:
-            # Pick first numeric parameter
-            for p, v in params.items():
-                if isinstance(v, (int, float)):
-                    target_param = p
-                    break
-
-        if not target_param:
-            bad = "Error: Could not identify parameter to edit."
-            return bad, bad
-
-        old_val = params[target_param]
-        # Calculate new value
-        if any(w in inst_lower for w in ["reduce", "shrink", "narrow", "thinner", "decrease"]):
-            new_val = max(1.0, old_val - abs(delta))
-        elif any(w in inst_lower for w in ["double", "twice"]):
-            new_val = old_val * 2.0
-        else:
-            new_val = old_val + abs(delta)
-
-        # Match exact search line from script
-        search_line = None
-        for line in script.splitlines():
-            if line.strip().startswith(f"{target_param}") and "=" in line:
-                search_line = line
-                break
-
-        if not search_line:
-            search_line = f"{target_param} = {old_val}"
-            replace_line = f"{target_param} = {new_val}"
-        else:
-            # Preserve formatting / spacing
-            eq_idx = search_line.find("=")
-            prefix = search_line[:eq_idx + 1]
-            replace_line = f"{prefix} {new_val}"
 
         if mode == "full_regen":
-            edited_script = script.replace(search_line, replace_line, 1)
-            return edited_script, edited_script
+            return res["edited_script"], res["edited_script"]
 
-        patch = f"<<<<<<< SEARCH\n{search_line}\n=======\n{replace_line}\n>>>>>>> REPLACE"
-        return patch, patch
+        return res["patch"], res["patch"]
 
 
 class AsyncModelQueue:

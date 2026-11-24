@@ -12,6 +12,23 @@ from cadpatch.patching import apply_patch, make_patch, STATUS_SUCCESS
 from .prompt_formatter import format_patch_prompt, format_full_prompt
 
 
+def resolve_device_and_dtype(device_pref: str = "auto") -> Tuple[torch.device, torch.dtype]:
+    pref = (device_pref or "auto").lower()
+    if (pref in ("cuda", "auto")) and torch.cuda.is_available():
+        return torch.device("cuda"), torch.float16
+    elif (pref in ("mps", "auto")) and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps"), torch.bfloat16
+    else:
+        return torch.device("cpu"), torch.float32
+
+
+def empty_device_cache(device: torch.device):
+    if device.type == "cuda" and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    elif device.type == "mps" and hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+        torch.mps.empty_cache()
+
+
 class LoRAPatchPredictor:
     """
     Inference predictor for the LoRA patch model.
@@ -22,17 +39,17 @@ class LoRAPatchPredictor:
         base_model_name: str,
         adapter_path: Optional[str] = None,
         max_new_tokens: int = 256,
-        retry_attempts: int = 1
+        retry_attempts: int = 1,
+        device: str = "auto"
     ):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device, self.dtype = resolve_device_and_dtype(device)
         self.tokenizer = AutoTokenizer.from_pretrained(base_model_name, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
         base_model = AutoModelForCausalLM.from_pretrained(
             base_model_name,
-            torch_dtype=torch_dtype,
+            torch_dtype=self.dtype,
             trust_remote_code=True
         )
 
@@ -79,8 +96,10 @@ class LoRAPatchPredictor:
             applied_code, status = apply_patch(orig_code, patch)
 
             if status == STATUS_SUCCESS:
+                empty_device_cache(self.device)
                 return patch, applied_code
 
+        empty_device_cache(self.device)
         # If patch failed after retries, return last attempt or ground-truth format attempt
         return patch, orig_code
 
@@ -101,17 +120,17 @@ class LoRAFullRegenPredictor:
         self,
         base_model_name: str,
         adapter_path: Optional[str] = None,
-        max_new_tokens: int = 512
+        max_new_tokens: int = 512,
+        device: str = "auto"
     ):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device, self.dtype = resolve_device_and_dtype(device)
         self.tokenizer = AutoTokenizer.from_pretrained(base_model_name, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
         base_model = AutoModelForCausalLM.from_pretrained(
             base_model_name,
-            torch_dtype=torch_dtype,
+            torch_dtype=self.dtype,
             trust_remote_code=True
         )
 
@@ -148,4 +167,5 @@ class LoRAFullRegenPredictor:
         pred_code = re.sub(r"```$", "", pred_code, flags=re.MULTILINE).strip()
 
         patch = make_patch(orig_code, pred_code)
+        empty_device_cache(self.device)
         return patch, pred_code

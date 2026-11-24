@@ -18,6 +18,7 @@ def normalize_code(code: str) -> str:
 
 def extract_top_level_params(code_str: str) -> Dict[str, Any]:
     """Extracts top-level variable assignments using AST analysis."""
+    from cadpatch.patching.expr import _eval_ast_node
     params = {}
     try:
         tree = ast.parse(code_str)
@@ -25,12 +26,12 @@ def extract_top_level_params(code_str: str) -> Dict[str, Any]:
             if isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
-                        # Attempt to evaluate constant or unary number
-                        if isinstance(node.value, ast.Constant):
-                            params[target.id] = node.value.value
-                        elif isinstance(node.value, ast.UnaryOp) and isinstance(node.value.operand, ast.Constant):
-                            val = node.value.operand.value
-                            params[target.id] = -val if isinstance(node.value.op, ast.USub) else val
+                        try:
+                            val = _eval_ast_node(node.value)
+                            params[target.id] = val
+                        except Exception:
+                            if isinstance(node.value, ast.Constant):
+                                params[target.id] = node.value.value
     except Exception:
         pass
     return params

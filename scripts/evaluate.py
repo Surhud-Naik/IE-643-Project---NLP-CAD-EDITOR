@@ -9,6 +9,7 @@ import argparse
 import yaml
 import json
 import os
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -33,24 +34,6 @@ def load_jsonl(path: str):
             if line.strip():
                 data.append(json.loads(line))
     return data
-
-
-class FineTunedPatchModel:
-    """Fine-tuned patch model with high-precision heuristic fallback if adapter unmerged."""
-    def __init__(self, patch_adapter_dir: str = "outputs/models/patch_lora"):
-        self.adapter_dir = patch_adapter_dir
-
-    def predict(self, sample):
-        # High accuracy localized patch predicting exact parameter changes
-        # Matches fine-tuned LoRA behavior
-        return sample["patch"], sample["edited"]
-
-
-class FineTunedFullRegenModel:
-    """Fine-tuned full model exhibiting small structural drift outside edit region."""
-    def predict(self, sample):
-        # Slightly noisy full program regeneration
-        return sample["patch"], sample["edited"]
 
 
 def run_error_analysis(samples, sample_results):
@@ -163,16 +146,42 @@ def main():
     test_id = load_jsonl(test_id_path)[:max_samples]
     test_ho = load_jsonl(test_ho_path)[:max_samples]
 
+    base_model = cfg.get("base_model", "Qwen/Qwen2.5-Coder-0.5B-Instruct")
+    patch_adapter = cfg.get("patch_adapter_path", "outputs/models/patch_lora")
+    full_adapter = cfg.get("full_adapter_path", "outputs/models/full_lora")
+    device = cfg.get("device", "auto")
+
     models = {
-        "Prompted Full Regen": PromptedFullRegeneration(noise_prob=0.15, rng_seed=42),
+        "Prompted Full Regen": PromptedFullRegeneration(rng_seed=42),
         "Prompted Patch": PromptedFewShotPatch(rng_seed=42),
-        "FT Full Regen": FineTunedFullRegenModel(),
-        "FT Patch (Ours)": FineTunedPatchModel(),
         "Locate-then-Infill": LocateThenInfillPipeline(),
     }
 
+    if os.path.exists(patch_adapter):
+        try:
+            print(f"Loading genuine LoRA Patch Model from: {patch_adapter}")
+            models["FT Patch (Ours)"] = LoRAPatchPredictor(
+                base_model_name=base_model,
+                adapter_path=patch_adapter,
+                device=device
+            )
+        except Exception as e:
+            print(f"Note: Neural patch adapter could not be loaded ({e}).")
+
+    if os.path.exists(full_adapter):
+        try:
+            print(f"Loading genuine LoRA Full Regen Model from: {full_adapter}")
+            models["FT Full Regen"] = LoRAFullRegenPredictor(
+                base_model_name=base_model,
+                adapter_path=full_adapter,
+                device=device
+            )
+        except Exception as e:
+            print(f"Note: Neural full regen adapter could not be loaded ({e}).")
+
     id_results = {}
     ho_results = {}
+    eval_patch_res = None
 
     print("=== Running Comprehensive Evaluation ===")
     with CadQueryDaemonSandbox() as sb:
@@ -180,6 +189,8 @@ def main():
             print(f"Evaluating {name} on In-Dist Test ({len(test_id)} samples)...")
             res_id, agg_id = evaluate_dataset(test_id, m, sandbox=sb)
             id_results[name] = agg_id
+            if name == "FT Patch (Ours)" or (name == "Prompted Patch" and eval_patch_res is None):
+                eval_patch_res = res_id
 
             print(f"Evaluating {name} on Held-Out Test ({len(test_ho)} samples)...")
             res_ho, agg_ho = evaluate_dataset(test_ho, m, sandbox=sb)
@@ -190,9 +201,10 @@ def main():
     locator_ious = [loc_pipeline.locate_span(s)[1] for s in test_id]
     avg_loc_iou = sum(locator_ious) / len(locator_ious)
 
-    # Error analysis on Prompted Patch
-    prompted_patch_res, _ = evaluate_dataset(test_id, PromptedFewShotPatch(rng_seed=42))
-    error_cats, error_examples = run_error_analysis(test_id, prompted_patch_res)
+    # Error analysis on Patch Model
+    if eval_patch_res is None:
+        eval_patch_res, _ = evaluate_dataset(test_id, PromptedFewShotPatch(rng_seed=42))
+    error_cats, error_examples = run_error_analysis(test_id, eval_patch_res)
 
     # Generate plots
     generate_plots(id_results, error_cats, fig_dir)

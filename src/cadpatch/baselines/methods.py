@@ -2,7 +2,7 @@
 Baseline prediction strategies and oracle sanity check methods.
 """
 
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 import random
 import re
 from cadpatch.patching import make_patch, apply_patch
@@ -57,41 +57,25 @@ class OracleRandomPerturbation(BaselineMethod):
 
 class PromptedFewShotPatch(BaselineMethod):
     """
-    In-context few-shot prompting baseline that generates search/replace patch.
-    Employs regex heuristics mimicking a zero-shot/few-shot code model.
+    Prompted few-shot patch baseline.
+    If a neural predictor (e.g. LoRAPatchPredictor with base model) is supplied, runs it;
+    otherwise resolves the natural language instruction using safe AST arithmetic evaluation.
     """
-    def __init__(self, rng_seed: int = 42):
+    def __init__(self, predictor: Optional[Any] = None, rng_seed: int = 42):
+        self.predictor = predictor
         self.rng = random.Random(rng_seed)
 
     def predict(self, sample: Dict[str, Any]) -> Tuple[str, str]:
+        if self.predictor is not None:
+            return self.predictor.predict(sample)
+
+        from cadpatch.patching.expr import resolve_instruction_edits
         orig = sample["original"]
         instruction = sample["instruction"]
 
-        # Parse numbers from instruction
-        numbers = [float(x) for x in re.findall(r"\b\d+(?:\.\d+)?\b", instruction)]
-        orig_params = extract_top_level_params(orig)
-
-        # Keyword matching heuristics for prompt baseline
-        target_param = None
-        for p in orig_params:
-            p_lower = p.lower().replace("_", " ")
-            parts = p_lower.split()
-            if any(part in instruction.lower() for part in parts):
-                target_param = p
-                break
-
-        if not target_param and orig_params:
-            target_param = list(orig_params.keys())[0]
-
-        if target_param and numbers:
-            new_val = numbers[-1]
-            old_val = orig_params[target_param]
-            search_str = f"{target_param} = {old_val:.1f}"
-            replace_str = f"{target_param} = {new_val:.1f}"
-            patch = f"<<<<<<< SEARCH\n{search_str}\n=======\n{replace_str}\n>>>>>>> REPLACE"
-            pred_prog, status = apply_patch(orig, patch)
-            if status == "SUCCESS":
-                return patch, pred_prog
+        res = resolve_instruction_edits(orig, instruction)
+        if res["success"]:
+            return res["patch"], res["edited_script"]
 
         return "", orig
 
@@ -99,23 +83,25 @@ class PromptedFewShotPatch(BaselineMethod):
 class PromptedFullRegeneration(BaselineMethod):
     """
     Prompted full program regeneration baseline.
-    Regenerates the complete script with potential drift outside target regions.
+    If a neural predictor (e.g. LoRAFullRegenPredictor with base model) is supplied, runs it;
+    otherwise regenerates the complete script from the instruction without ground-truth cheats.
     """
-    def __init__(self, noise_prob: float = 0.15, rng_seed: int = 42):
-        self.noise_prob = noise_prob
+    def __init__(self, predictor: Optional[Any] = None, rng_seed: int = 42):
+        self.predictor = predictor
         self.rng = random.Random(rng_seed)
 
     def predict(self, sample: Dict[str, Any]) -> Tuple[str, str]:
-        # Uses the edited code with a chance of formatting / comment drift or small syntax slips
-        edited = sample["edited"]
-        if self.rng.random() < self.noise_prob:
-            # Full regeneration introduces slight drift in unmodified comments or lines
-            lines = edited.splitlines()
-            if len(lines) > 5:
-                # Slight whitespace or parameter disturbance
-                drift_idx = self.rng.randint(2, len(lines) - 2)
-                lines[drift_idx] = lines[drift_idx] + "  # auto-regenerated"
-                edited = "\n".join(lines)
+        if self.predictor is not None:
+            return self.predictor.predict(sample)
 
-        patch = make_patch(sample["original"], edited)
-        return patch, edited
+        from cadpatch.patching.expr import resolve_instruction_edits
+        orig = sample["original"]
+        instruction = sample["instruction"]
+
+        res = resolve_instruction_edits(orig, instruction)
+        if res["success"]:
+            edited = res["edited_script"]
+            patch = make_patch(orig, edited)
+            return patch, edited
+
+        return "", orig

@@ -115,42 +115,13 @@ def predict_cad_patch(original_code: str, instruction: str) -> Tuple[str, str, O
     orig_img_path = render_stl_to_image(orig_stl_bytes, color="#3b82f6", title="Original CAD Model")
 
     # 2. Patch Prediction Engine
-    # Parses semantic instruction intent and parameters
-    import re
-    numbers = [float(x) for x in re.findall(r"\b\d+(?:\.\d+)?\b", instruction)]
-    orig_params = extract_top_level_params(original_code)
-
-    edited_code = original_code
-    patch_str = ""
-
-    # Check multi-parameter or single parameter matching
-    matched_updates = {}
-    for p, old_val in orig_params.items():
-        p_clean = p.lower().replace("_", " ")
-        if any(w in instruction.lower() for w in p_clean.split()):
-            # Find relevant number
-            if numbers:
-                # Relative or absolute
-                if "by" in instruction.lower():
-                    delta = numbers[0]
-                    if any(w in instruction.lower() for w in ["reduce", "decrease", "smaller", "narrow"]):
-                        new_val = old_val - delta
-                    else:
-                        new_val = old_val + delta
-                else:
-                    new_val = numbers[0]
-                matched_updates[p] = new_val
-
-    # If numbers matched
-    if matched_updates:
-        for p, new_val in matched_updates.items():
-            pattern = rf"\b{p}\s*=\s*[\d\.]+"
-            edited_code = re.sub(pattern, f"{p} = {new_val:.1f}", edited_code, count=1)
-        patch_str = make_patch(original_code, edited_code)
-    else:
-        # Fallback to general patch block
+    from cadpatch.patching.expr import resolve_instruction_edits
+    res = resolve_instruction_edits(original_code, instruction)
+    if not res["success"]:
         patch_str = "<<<<<<< SEARCH\n# (Unresolved parameter in instruction)\n=======\n# (Unresolved)\n>>>>>>> REPLACE"
-        return patch_str, original_code, orig_img_path, orig_img_path, "Warning: Could not resolve target parameters from instruction."
+        return patch_str, original_code, orig_img_path, orig_img_path, f"Warning: {res.get('error', 'Could not resolve target parameters from instruction.')}"
+
+    patch_str = res["patch"]
 
     # 3. Apply Patch
     applied_prog, patch_status = apply_patch(original_code, patch_str)

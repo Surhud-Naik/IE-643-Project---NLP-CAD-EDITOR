@@ -4,3 +4,7 @@ test_heldout_path: data/test_heldout.jsonl
 val_path: data/val.jsonl
 output_dir: outputs/eval
 max_eval_samples: 100  # Evaluate on up to 100 test samples per split for comprehensive coverage
+base_model: Qwen/Qwen2.5-Coder-0.5B-Instruct
+patch_adapter_path: outputs/models/patch_lora
+full_adapter_path: outputs/models/full_lora
+device: auto

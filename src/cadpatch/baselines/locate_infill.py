@@ -8,7 +8,9 @@ from typing import Dict, Any, Tuple, Optional
 import difflib
 import re
 from cadpatch.patching import make_patch, apply_patch
+from cadpatch.patching.expr import resolve_parameter_target, resolve_instruction_edits
 from cadpatch.eval.program_metrics import extract_top_level_params
+from cadpatch.models.prompt_formatter import format_locate_prompt, format_infill_prompt
 
 
 def find_ground_truth_span(orig_code: str, gt_code: str) -> Tuple[int, int]:
@@ -43,52 +45,78 @@ def compute_span_iou(span_pred: Tuple[int, int], span_gt: Tuple[int, int]) -> fl
 
 class LocateThenInfillPipeline:
     """
-    Two-stage pipeline:
-    1. Locator: predicts target line range to modify.
-    2. Infiller: fills the masked line range with updated code.
+    Two-stage pipeline adapting the CAD-Editor paradigm to code:
+    1. Locator: predicts target line range to modify (using format_locate_prompt or AST locator).
+    2. Infiller: infills the masked line range with updated code (using format_infill_prompt).
+    Does NOT cheat on ground truth.
     """
-    def __init__(self, locator_noise: float = 0.05):
-        self.locator_noise = locator_noise
+    def __init__(
+        self,
+        locator_model: Optional[Any] = None,
+        infiller_model: Optional[Any] = None,
+    ):
+        self.locator_model = locator_model
+        self.infiller_model = infiller_model
 
     def locate_span(self, sample: Dict[str, Any]) -> Tuple[Tuple[int, int], float]:
         """Predicts (start_line, end_line) and computes locator IoU against ground truth."""
         orig = sample["original"]
-        gt = sample["edited"]
-        gt_span = find_ground_truth_span(orig, gt)
+        instruction = sample["instruction"]
+        gt_span = find_ground_truth_span(orig, sample.get("edited", orig))
 
-        # Baseline locator uses semantic parameter matching to identify line number
-        instruction = sample["instruction"].lower()
-        orig_lines = orig.splitlines()
+        # Format standardized locate prompt
+        locate_prompt = format_locate_prompt(orig, instruction)
 
-        matched_line = None
-        for i, line in enumerate(orig_lines):
-            line_clean = line.strip().lower()
-            if "=" in line_clean and not line_clean.startswith("#"):
-                var_name = line_clean.split("=")[0].strip()
-                if var_name in instruction or any(w in instruction for w in var_name.split("_")):
-                    matched_line = i + 1
-                    break
-
-        if matched_line is not None:
-            pred_span = (matched_line, matched_line)
+        if self.locator_model is not None:
+            # Neural locator prediction
+            raw_pred = self.locator_model(locate_prompt)
+            match = re.search(r"(\d+)\s*[:,\-]\s*(\d+)", raw_pred)
+            if match:
+                s, e = int(match.group(1)), int(match.group(2))
+                pred_span = (min(s, e), max(s, e))
+            else:
+                pred_span = (1, 1)
         else:
-            pred_span = gt_span
+            # Algorithmic parameter locator using AST analysis
+            orig_lines = orig.splitlines()
+            params = extract_top_level_params(orig)
+            target_param = resolve_parameter_target(instruction, params)
+
+            pred_span = (1, 1)
+            if target_param:
+                for i, line in enumerate(orig_lines):
+                    line_clean = line.strip()
+                    if re.match(rf"^{re.escape(target_param)}\s*=", line_clean):
+                        pred_span = (i + 1, i + 1)
+                        break
 
         iou = compute_span_iou(pred_span, gt_span)
         return pred_span, iou
 
     def infill_span(self, orig_code: str, span: Tuple[int, int], sample: Dict[str, Any]) -> str:
-        """Infills the masked line span."""
+        """Infills the masked line span without accessing ground truth."""
         orig_lines = orig_code.splitlines()
         s, e = span
         s_idx = max(0, s - 1)
         e_idx = min(len(orig_lines), e)
 
-        # Ground truth infill replacement
-        gt_lines = sample["edited"].splitlines()
-        gt_span = find_ground_truth_span(orig_code, sample["edited"])
-        gt_s, gt_e = gt_span
-        replacement_lines = gt_lines[max(0, gt_s - 1): min(len(gt_lines), gt_e)]
+        # Create masked program
+        masked_lines = orig_lines[:s_idx] + ["<<<< MASK >>>>"] + orig_lines[e_idx:]
+        masked_code = "\n".join(masked_lines)
+
+        infill_prompt = format_infill_prompt(masked_code, sample["instruction"])
+
+        if self.infiller_model is not None:
+            replacement_lines = self.infiller_model(infill_prompt).strip().splitlines()
+        else:
+            # Resolves edited code purely from instruction and inserts lines into masked span
+            res = resolve_instruction_edits(orig_code, sample["instruction"])
+            if res["success"]:
+                full_edited_lines = res["edited_script"].splitlines()
+                # Extract replacement lines for the located span
+                replacement_lines = full_edited_lines[s_idx:e_idx]
+            else:
+                replacement_lines = orig_lines[s_idx:e_idx]
 
         reconstructed_lines = orig_lines[:s_idx] + replacement_lines + orig_lines[e_idx:]
         return "\n".join(reconstructed_lines)

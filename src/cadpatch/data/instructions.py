@@ -13,12 +13,31 @@ VERBS_SET = ["Set", "Change", "Adjust", "Modify", "Update", "Configure", "Re-dim
 UNITS = ["mm", " mm", ""]
 
 
+def format_numeric_expression(val: float, rng: random.Random, allow_math: bool = True) -> str:
+    """
+    Formats a numeric value either as a direct number or as an equivalent arithmetic expression
+    (e.g. 5.0 -> '10/2', 8.0 -> '4*2', 4.0 -> '12-8', 3.0 -> '6/2').
+    """
+    if allow_math and rng.random() < 0.35:
+        val_int = int(round(val))
+        if abs(val - val_int) < 1e-4 and val_int > 0:
+            options = [f"{val_int * 2}/2"]
+            if val_int * 4 <= 120:
+                options.append(f"{val_int * 4}/4")
+            if val_int % 2 == 0 and val_int > 2:
+                options.append(f"{val_int // 2}*2")
+            options.append(f"{val_int + 4}-4")
+            return rng.choice(options)
+
+    return f"{val:.1f}".rstrip("0").rstrip(".") if val == int(val) else f"{val:.1f}"
+
+
 def format_instruction_single_abs(semantic_name: str, old_val: float, new_val: float, rng: random.Random) -> str:
-    """e.g. 'Increase the base length from 50 mm to 60 mm' or 'Set the mounting hole diameter to 8 mm'."""
+    """e.g. 'Increase the base length to 60 mm' or 'Set the mounting hole diameter to 10/2 mm'."""
     verb_set = rng.choice(VERBS_SET)
     unit = rng.choice(UNITS)
-    val_str = f"{new_val:.1f}".rstrip("0").rstrip(".") if new_val == int(new_val) else f"{new_val:.1f}"
-    old_str = f"{old_val:.1f}".rstrip("0").rstrip(".") if old_val == int(old_val) else f"{old_val:.1f}"
+    val_str = format_numeric_expression(new_val, rng)
+    old_str = format_numeric_expression(old_val, rng, allow_math=False)
 
     patterns = [
         f"{verb_set} the {semantic_name} to {val_str}{unit}.",
@@ -26,15 +45,17 @@ def format_instruction_single_abs(semantic_name: str, old_val: float, new_val: f
         f"{'Increase' if new_val > old_val else 'Reduce'} the {semantic_name} to {val_str}{unit}.",
         f"Modify the {semantic_name} from {old_str}{unit} to {val_str}{unit}.",
         f"Make the {semantic_name} equal to {val_str}{unit}.",
+        f"Configure {semantic_name} to {val_str}{unit}.",
+        f"Adjust the {semantic_name} to measure {val_str}{unit}.",
     ]
     return rng.choice(patterns)
 
 
 def format_instruction_single_rel(semantic_name: str, delta: float, rng: random.Random) -> str:
-    """e.g. 'Enlarge the plate length by 10 mm' or 'Reduce the wall thickness by 2 mm'."""
+    """e.g. 'Enlarge the plate length by 10/2 mm' or 'Reduce the wall thickness by 4/2 mm'."""
     unit = rng.choice(UNITS)
     abs_delta = abs(delta)
-    delta_str = f"{abs_delta:.1f}".rstrip("0").rstrip(".") if abs_delta == int(abs_delta) else f"{abs_delta:.1f}"
+    delta_str = format_numeric_expression(abs_delta, rng)
 
     if delta > 0:
         verb = rng.choice(VERBS_INCREASE)
@@ -43,7 +64,10 @@ def format_instruction_single_rel(semantic_name: str, delta: float, rng: random.
             f"Make the {semantic_name} {delta_str}{unit} larger.",
             f"Add {delta_str}{unit} to the {semantic_name}.",
             f"Expand the {semantic_name} by an additional {delta_str}{unit}.",
+            f"Lengthen the {semantic_name} by {delta_str}{unit}.",
         ]
+        if "width" in semantic_name.lower():
+            patterns.append(f"Widen the {semantic_name} by {delta_str}{unit}.")
     else:
         verb = rng.choice(VERBS_DECREASE)
         patterns = [
@@ -51,7 +75,10 @@ def format_instruction_single_rel(semantic_name: str, delta: float, rng: random.
             f"Make the {semantic_name} {delta_str}{unit} smaller.",
             f"Subtract {delta_str}{unit} from the {semantic_name}.",
             f"Trim {delta_str}{unit} off the {semantic_name}.",
+            f"Shorten the {semantic_name} by {delta_str}{unit}.",
         ]
+        if "width" in semantic_name.lower():
+            patterns.append(f"Narrow the {semantic_name} by {delta_str}{unit}.")
     return rng.choice(patterns)
 
 
@@ -86,14 +113,14 @@ def format_instruction_single_factor(semantic_name: str, factor: float, rng: ran
 def format_instruction_multi_param(changes: List[Tuple[str, str, float, float]], rng: random.Random) -> str:
     """
     changes: [(param, semantic_name, old_val, new_val), ...]
-    e.g. 'Adjust dimensions: increase base length to 70 mm and reduce width by 5 mm.'
+    e.g. 'Adjust dimensions: increase base length by 10/2 mm and reduce thickness by 2 mm.'
     """
     clauses = []
     for param, sem_name, old_v, new_v in changes:
         delta = new_v - old_v
         unit = rng.choice(UNITS)
-        val_str = f"{new_v:.1f}".rstrip("0").rstrip(".") if new_v == int(new_v) else f"{new_v:.1f}"
-        delta_str = f"{abs(delta):.1f}".rstrip("0").rstrip(".") if abs(delta) == int(abs(delta)) else f"{abs(delta):.1f}"
+        val_str = format_numeric_expression(new_v, rng)
+        delta_str = format_numeric_expression(abs(delta), rng)
 
         if rng.random() > 0.5:
             # Absolute clause
@@ -103,7 +130,12 @@ def format_instruction_multi_param(changes: List[Tuple[str, str, float, float]],
             clause = f"{'expand' if delta > 0 else 'reduce'} the {sem_name} by {delta_str}{unit}"
         clauses.append(clause)
 
-    return f"Simultaneously {clauses[0]} and {clauses[1]}."
+    templates = [
+        f"Simultaneously {clauses[0]} and {clauses[1]}.",
+        f"Please {clauses[0]} and {clauses[1]}.",
+        f"Adjust dimensions: {clauses[0]} while you {clauses[1]}.",
+    ]
+    return rng.choice(templates)
 
 
 def format_instruction_feature_toggle(feature_name: str, enable: bool, value: Optional[float], rng: random.Random) -> str:
